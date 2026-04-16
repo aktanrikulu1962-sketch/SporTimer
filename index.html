@@ -86,20 +86,20 @@
 <div class="app">
   <div class="card">
     <h1>Spor Zamanlayıcı</h1>
-    <div class="sub">Sesler sırayla çalar; aynı anda üst üste binmez.</div>
+    <div class="sub">iPhone Safari'de çalışır. İstersen sonra Ana Ekran'a ekleyebilirsin.</div>
   </div>
 
   <div class="card">
     <div class="phase" id="phase">Hazır</div>
-    <div class="timer" id="timer">00:30</div>
+    <div class="timer" id="timer">00:45</div>
     <div class="setline" id="setline">Tur 1 / 13</div>
   </div>
 
   <div class="card">
     <div class="sub" style="margin-bottom:10px;">Çalışma süresi</div>
     <div class="grid">
-      <button class="opt active" data-work="30">30 sn</button>
-      <button class="opt" data-work="45">45 sn</button>
+      <button class="opt" data-work="30">30 sn</button>
+      <button class="opt active" data-work="45">45 sn</button>
       <button class="opt" data-work="60">60 sn</button>
       <button class="opt" data-work="120">120 sn</button>
     </div>
@@ -121,9 +121,7 @@
       <button class="toggle active" id="screenToggle">Ekranı açık tut</button>
     </div>
     <div class="info" style="margin-top:12px;">
-      Akış: “Birkaç saniye içinde başlıyoruz” → 3 saniye tik-tak → gong → “Başla” →
-      çalışma süresi boyunca tik-tak → gong → “Dinlen” → dinlenme boyunca tik-tak.
-      Sesler çakışmayacak şekilde sıraya konmuştur.
+      Başlat tuşuna basarak başlayınız..
     </div>
   </div>
 
@@ -134,14 +132,14 @@
     </div>
   </div>
 
-  <div class="footer">Not: İlk başlatma kullanıcı dokunuşuyla yapılmalıdır.</div>
+  <div class="footer">Not: iPhone'da ses üretimi için ilk başlatma kullanıcı dokunuşuyla yapılmalıdır.</div>
 </div>
 
 <script>
 (() => {
   let totalSets = 13;
-  let workSec = 30;
-  let restSec = 5;
+  let workSec = 45;
+  let restSec = 7;
   let currentSet = 1;
   let phase = 'ready';
   let remaining = workSec;
@@ -152,8 +150,6 @@
   let wakeLockEnabled = true;
   let wakeLock = null;
   let audioCtx = null;
-  let tickTimeouts = [];
-  let stateToken = 0;
 
   const phaseEl = document.getElementById('phase');
   const timerEl = document.getElementById('timer');
@@ -193,7 +189,7 @@
 
   function setWork(newWork) {
     workSec = newWork;
-    restSec = (newWork === 120) ? 10 : 5;
+    restSec = (newWork === 120) ? 12 : 7;
     if (!running) {
       phase = 'ready';
       currentSet = 1;
@@ -204,8 +200,12 @@
   }
 
   function ensureAudio() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
   }
 
   function tone(freq=880, duration=0.12, type='sine', gainValue=0.08, attack=0.01) {
@@ -225,19 +225,37 @@
     } catch(e){}
   }
 
-  function gong(duration=1.0) {
-    tone(520, duration, 'sine', 0.09, 0.02);
-    setTimeout(() => tone(390, duration + 0.2, 'triangle', 0.07, 0.03), 40);
+  function gong() {
+    tone(520, 1.0, 'sine', 0.09, 0.02);
+    setTimeout(() => tone(390, 1.2, 'triangle', 0.07, 0.03), 40);
   }
 
   function tickSound() {
-    tone(1400, 0.035, 'square', 0.03, 0.005);
+    tone(1400, 0.03, 'square', 0.03, 0.005);
+  }
+
+  function restPulse() {
+    tone(600, 0.06, 'triangle', 0.05, 0.005);
+  }
+
+  function speak(text){
+    if (!voiceEnabled || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'tr-TR';
+      u.rate = 1.0;
+      u.pitch = 1.0;
+      window.speechSynthesis.speak(u);
+    } catch(e){}
   }
 
   async function requestWakeLock() {
     if (!wakeLockEnabled) return;
     try {
-      if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
     } catch(e){}
   }
 
@@ -257,165 +275,109 @@
     }
   }
 
-  function clearTickSchedule() {
-    tickTimeouts.forEach(id => clearTimeout(id));
-    tickTimeouts = [];
-  }
-
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  async function speak(text, tokenAtCall) {
-    if (!voiceEnabled || !('speechSynthesis' in window)) return;
-    if (tokenAtCall !== stateToken || !running) return;
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'tr-TR';
-      u.rate = 1.0;
-      u.pitch = 1.0;
-      const p = new Promise(resolve => {
-        u.onend = () => resolve();
-        u.onerror = () => resolve();
-      });
-      window.speechSynthesis.speak(u);
-      await Promise.race([p, sleep(3000)]);
-    } catch(e){}
-  }
-
-  function scheduleTicks(totalSeconds, tokenAtCall) {
-    if (!tickEnabled) return;
-    clearTickSchedule();
-    for (let i = 1; i <= totalSeconds; i++) {
-      const id = setTimeout(() => {
-        if (!running || tokenAtCall !== stateToken) return;
-        tickSound();
-      }, i * 1000);
-      tickTimeouts.push(id);
-    }
-  }
-
   function resetState(stopped=false) {
-    stateToken++;
     clearTimer();
-    clearTickSchedule();
     running = false;
     currentSet = 1;
     phase = stopped ? 'stopped' : 'ready';
     remaining = workSec;
     updateDisplay();
-    try { window.speechSynthesis.cancel(); } catch(e){}
     releaseWakeLock();
   }
 
   function stopNow() {
     resetState(true);
+    speak('Durduruldu');
   }
 
-  function startCountdownTimer() {
+  function doneAll() {
+    clearTimer();
+    running = false;
+    phase = 'done';
+    remaining = 0;
+    updateDisplay();
+    gong();
+    speak('Set tamamlandı');
+    releaseWakeLock();
+  }
+
+  function enterRest() {
+    phase = 'rest';
+    remaining = restSec;
+    updateDisplay();
+    gong();
+    speak('Dinlen');
+    loop();
+  }
+
+  function enterNextWorkOrDone() {
+    if (currentSet >= totalSets) {
+      doneAll();
+      return;
+    }
+    currentSet += 1;
+    phase = 'work';
+    remaining = workSec;
+    updateDisplay();
+    gong();
+    speak('Başla');
+    loop();
+  }
+
+  function loop() {
     clearTimer();
     if (!running) return;
+
     timeoutId = setTimeout(() => {
       if (!running) return;
+
       remaining -= 1;
-      if (remaining < 0) remaining = 0;
+
+      if (phase === 'work' && remaining > 0 && tickEnabled) {
+        tickSound();
+      }
+      if (phase === 'rest' && remaining > 0) {
+        restPulse();
+      }
+
       updateDisplay();
+
       if (remaining <= 0) {
-        handlePhaseEnd();
+        if (phase === 'prestart') {
+          phase = 'work';
+          currentSet = 1;
+          remaining = workSec;
+          updateDisplay();
+          gong();
+          speak('Başla');
+          loop();
+        } else if (phase === 'work') {
+          enterRest();
+        } else if (phase === 'rest') {
+          enterNextWorkOrDone();
+        }
       } else {
-        startCountdownTimer();
+        loop();
       }
     }, 1000);
   }
 
-  async function handlePhaseEnd() {
-    const token = stateToken;
-    clearTickSchedule();
-
-    if (!running || token !== stateToken) return;
-
-    if (phase === 'prestart') {
-      gong();
-      await sleep(1300);
-      if (!running || token !== stateToken) return;
-      await speak('Başla', token);
-      if (!running || token !== stateToken) return;
-
-      phase = 'work';
-      currentSet = 1;
-      remaining = workSec;
-      updateDisplay();
-      scheduleTicks(workSec, token);
-      startCountdownTimer();
-      return;
-    }
-
-    if (phase === 'work') {
-      gong();
-      await sleep(1300);
-      if (!running || token !== stateToken) return;
-      await speak('Dinlen', token);
-      if (!running || token !== stateToken) return;
-
-      phase = 'rest';
-      remaining = restSec;
-      updateDisplay();
-      scheduleTicks(restSec, token);
-      startCountdownTimer();
-      return;
-    }
-
-    if (phase === 'rest') {
-      if (currentSet >= totalSets) {
-        phase = 'done';
-        remaining = 0;
-        running = false;
-        updateDisplay();
-        gong(1.2);
-        await sleep(1400);
-        if (token === stateToken) await speak('Set tamamlandı', token);
-        releaseWakeLock();
-        return;
-      }
-
-      currentSet += 1;
-      gong();
-      await sleep(1300);
-      if (!running || token !== stateToken) return;
-      await speak('Başla', token);
-      if (!running || token !== stateToken) return;
-
-      phase = 'work';
-      remaining = workSec;
-      updateDisplay();
-      scheduleTicks(workSec, token);
-      startCountdownTimer();
-    }
-  }
-
   async function startNow() {
-    stateToken++;
-    const token = stateToken;
     ensureAudio();
     await requestWakeLock();
     clearTimer();
-    clearTickSchedule();
-    try { window.speechSynthesis.cancel(); } catch(e){}
     running = true;
     currentSet = 1;
     phase = 'prestart';
     remaining = 3;
     updateDisplay();
-
-    await speak('Birkaç saniye içinde başlıyoruz', token);
-    if (!running || token !== stateToken) return;
-
-    scheduleTicks(3, token);
-    startCountdownTimer();
+    speak('Birkaç saniye sonra başlıyoruz');
+    loop();
   }
 
-  optButtons.forEach(btn => btn.addEventListener('click', () => setWork(Number(btn.dataset.work))));
+  optButtons.forEach(btn => btn.addEventListener('click', () => {
+    setWork(Number(btn.dataset.work));
+  }));
 
   tickToggle.addEventListener('click', () => {
     tickEnabled = !tickEnabled;
@@ -458,7 +420,7 @@
     }
   });
 
-  setWork(30);
+  setWork(45);
   updateDisplay();
 })();
 </script>
